@@ -1,0 +1,9 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+reqwest = "0.12.9"
+rss_parser = { path = "../rss_parser" }
+tokio = { version = "1", features = ["full"] }
