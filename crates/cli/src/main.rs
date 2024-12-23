@@ -15,5 +15,5 @@ async fn main() {
     let content = reqwest::get(feed_url).await.unwrap().text().await.unwrap();
     let channel = Channel::from(content.as_str());
 
-    dbg!(channel);
+    println!("{:?}", channel);
 }

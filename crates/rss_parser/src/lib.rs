@@ -1,13 +1,23 @@
-use std::option::Option::Some;
-
 use roxmltree::{Document, Node};
 
+pub mod extensions;
+
+use crate::extensions::atom;
+use crate::extensions::dublincore;
+
+/// Channel of an RSS feed
 #[derive(Debug, Clone, Default)]
 pub struct Channel {
+    /// Title of the channel
     pub title: String,
+    /// The URL for the website of this channel
     pub link: String,
+    /// Description of the channel
     pub description: String,
+    /// List of items (or articles) in the channel
     pub items: Vec<Item>,
+    /// Atom extension for the channel
+    pub atom: Option<String>,
 }
 
 impl Channel {
@@ -26,7 +36,10 @@ impl Channel {
     pub fn from(content: &str) -> Option<Channel> {
         let doc = match Document::parse(content) {
             Ok(doc) => doc,
-            Err(_) => return None,
+            Err(error) => {
+                eprintln!("Failed to parse XML: {}", error);
+                return None;
+            }
         };
 
         // TODO: Read attributes like channel link, item content and item creator
@@ -58,11 +71,17 @@ impl Channel {
                     }
                 }
                 "link" => {
-                    if element.tag_name().namespace() != Some("http://www.w3.org/2005/Atom") {
-                        continue;
+                    // TODO: ideally this would be handled by the base condition
+                    // but `roxmltree` does not return tag names with prefixes
+                    // so `atom:link` is returned as `link`
+                    if element.tag_name().namespace() == Some(atom::NAMESPACE) {
+                        if let Some(link) = atom::AtomExtension::get_value(element) {
+                            channel.atom = Some(link);
+                            continue;
+                        }
                     }
 
-                    if let Some(link) = element.attribute("href") {
+                    if let Some(link) = element.text() {
                         channel.link = String::from(link);
                     }
                 }
@@ -81,10 +100,15 @@ impl Channel {
 
 #[derive(Debug, Clone, Default)]
 pub struct Item {
+    // Title of the item
     pub title: String,
+    // Description of the item
     pub description: String,
+    // The HTML content
     pub content: String,
+    // Email address of the author of the item
     pub author: String,
+    // Categories this item belongs to
     pub categories: Vec<String>,
 }
 
@@ -109,17 +133,19 @@ impl Item {
                         item.description = String::from(content)
                     }
                 }
-                "creator" => {
-                    if let Some(content) = element.text() {
-                        item.author = String::from(content)
-                    }
-                }
                 "category" => {
                     if let Some(content) = element.text() {
                         item.categories.push(String::from(content));
                     }
                 }
-                _ => continue,
+                _ => match element.tag_name().namespace() {
+                    Some(dublincore::NAMESPACE) => {
+                        if let Some(content) = dublincore::DublinCoreExtension::get_value(element) {
+                            item.author = content;
+                        }
+                    }
+                    _ => continue,
+                },
             }
         }
 
@@ -132,10 +158,26 @@ mod tests {
     use crate::Channel;
     use tokio;
 
+    const TEST_CHANNEL: &'static str = r#"
+        <rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <channel>
+                <title>Test channel</title>
+                <description>This is a test channel</description>
+                <link>https://example.com</link>
+                <atom:link href="https://example.com/feed.xml"/>
+                <item>
+                    <title>Test item</title>
+                    <description>This is a test item</description>
+                    <dc:creator>Test author</dc:creator>
+                    <category>Test category</category>
+                </item>
+            </channel>
+        </rss>
+    "#;
+
     #[tokio::test]
     async fn test_channel_from_xml_string() {
-        let content = "<channel><title>Test channel</title><description>This is a test channel</description></channel>";
-        let channel = Channel::from(content).unwrap();
+        let channel = Channel::from(TEST_CHANNEL).unwrap();
 
         assert_eq!(channel.title, "Test channel");
         assert_eq!(channel.description, "This is a test channel");
